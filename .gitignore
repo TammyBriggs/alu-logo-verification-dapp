@@ -1,0 +1,19 @@
+# Node modules
+node_modules/
+
+# Environment variables
+.env
+
+# Hardhat artifacts and cache
+artifacts/
+cache/
+typechain/
+typechain-types/
+
+# Frontend build files
+build/
+dist/
+.next/
+
+# System files
+.DS_Store
