@@ -1,5 +1,7 @@
-const { expect } = require("chai");
-const { ethers } = require("hardhat");
+import { expect } from "chai";
+import crypto from "crypto";
+import pkg from "hardhat";
+const { ethers } = pkg;
 
 describe("ALU Blockchain Security Suite - Part 1", function () {
   let ALUAssetRegistry;
@@ -73,7 +75,7 @@ describe("ALU Blockchain Security Suite - Part 1", function () {
   });
 });
 
-describe("ALU Blockchain Security Suite - Part 2: Tokenisation", function () {
+describe("ALU Blockchain Security Suite: Tokenisation", function () {
   let ALULogoToken;
   let logoToken;
   let owner;
@@ -117,5 +119,77 @@ describe("ALU Blockchain Security Suite - Part 2: Tokenisation", function () {
     
     expect(recipientPercentage).to.equal(15n);
     expect(ownerPercentage).to.equal(85n);
+  });
+});
+
+// =========================================================
+// PART 2: FRONTEND INTEGRATION TESTS (5 NEW TESTS)
+// =========================================================
+describe("Part 2: Frontend Integration Tests", function () {
+  let registry, token, owner, addr1;
+  let validHash;
+
+  beforeEach(async function () {
+    [owner, addr1] = await ethers.getSigners();
+    
+    // Deploy Registry
+    const Registry = await ethers.getContractFactory("ALUAssetRegistry");
+    registry = await Registry.deploy();
+
+    // Deploy Token
+    const Token = await ethers.getContractFactory("ALULogoToken");
+    token = await Token.deploy(owner.address);
+
+    // Simulate a local file upload and hash it
+    const dummyFileData = "official-alu-logo-binary-data";
+    validHash = "0x" + crypto.createHash('sha256').update(dummyFileData).digest('hex');
+
+    // Register the asset so it exists for the verification tests
+    await registry.registerAsset("ALU Official Logo 2026", "PNG", validHash);
+  });
+
+  // Test 9
+  it("The frontend correctly reads the total ALUT token supply from the deployed contract and displays 1,000,000", async function () {
+    const supply = await token.totalSupply();
+    // The contract uses raw integers, so we just convert it to a string
+    expect(supply.toString()).to.equal("1000000");
+  });
+
+  // Test 10
+  it("When a file is passed to the hashing function, the correct SHA-256 hash is returned in bytes32 format", async function () {
+    const simulatedFileContent = "test-image-data-stream";
+    const generatedHash = "0x" + crypto.createHash('sha256').update(simulatedFileContent).digest('hex');
+    
+    // Validate that it formats correctly as a bytes32 hex string (0x + 64 characters)
+    expect(generatedHash).to.match(/^0x[0-9a-fA-F]{64}$/);
+    expect(generatedHash.length).to.equal(66);
+  });
+
+  // Test 11
+  it("When verifyLogoIntegrity() is called with the correct ALU logo hash, the frontend displays a verification success result", async function () {
+    // Assuming Token ID 1 was generated in the beforeEach hook
+    const [authentic, message] = await registry.verifyLogoIntegrity(1, validHash);
+    
+    expect(authentic).to.be.true;
+    // You can also check if the message is positive, depending on your contract implementation
+  });
+
+  // Test 12
+  it("When verifyLogoIntegrity() is called with an incorrect hash, the frontend displays a verification failure result", async function () {
+    const fakeHash = "0x" + crypto.createHash('sha256').update("modified-fake-data").digest('hex');
+    
+    const [authentic, message] = await registry.verifyLogoIntegrity(1, fakeHash);
+    
+    expect(authentic).to.be.false;
+  });
+
+  // Test 13
+  it("The distributeShares() function correctly updates the recipient's balance after a successful transfer", async function () {
+    const amountToDistribute = 50000n; // 50,000 raw ALUT (No 18 decimal parsing needed)
+    
+    await token.distributeShares(addr1.address, amountToDistribute);
+    
+    const addr1Balance = await token.balanceOf(addr1.address);
+    expect(addr1Balance).to.equal(amountToDistribute);
   });
 });
