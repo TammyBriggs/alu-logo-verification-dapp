@@ -5,21 +5,22 @@ async function main() {
   const [deployer] = await ethers.getSigners();
   console.log("==========================================================");
   console.log("Deploying contracts with the account:", deployer.address);
-  console.log("Account balance:", (await deployer.getBalance()).toString());
+  // FIX: Access provider from the signer in v6
+  console.log("Account balance:", (await deployer.provider.getBalance(deployer.address)).toString());
   console.log("==========================================================");
 
   // 1. Deploy ALUAssetRegistry
   const ALUAssetRegistry = await ethers.getContractFactory("ALUAssetRegistry");
   const assetRegistry = await ALUAssetRegistry.deploy();
-  await assetRegistry.deployed();
+  // FIX: v6 uses waitForDeployment()
+  await assetRegistry.waitForDeployment(); 
 
-  console.log(`ALUAssetRegistry deployed to: ${assetRegistry.address}`);
+  const registryAddress = await assetRegistry.getAddress();
+  console.log(`ALUAssetRegistry deployed to: ${registryAddress}`);
 
-  // 2. Automatically register the official ALU logo during deployment
+  // 2. Automatically register the official ALU logo
   const assetName = "ALU Official Logo";
   const fileType = "png";
-  
-  // The exact hex hash generated from the alu-logo.png file
   const logoContentHash = "0xac588b92aaed6542a2c537fe0e4ad264095811768e017f74228535d8ad9ecc9b";
 
   console.log(`Registering asset: "${assetName}" with hash: ${logoContentHash}...`);
@@ -27,9 +28,19 @@ async function main() {
   const tx = await assetRegistry.registerAsset(assetName, fileType, logoContentHash);
   const receipt = await tx.wait();
 
-  // Find the AssetRegistered event from the logs to extract the Token ID
-  const event = receipt.events?.find(e => e.event === 'AssetRegistered');
-  const tokenId = event?.args?.tokenId;
+  // FIX: v6 uses receipt.logs instead of receipt.events
+  // We need to interface the event using the contract's interface
+  const event = receipt.logs.find(log => {
+      try {
+          const parsed = assetRegistry.interface.parseLog(log);
+          return parsed.name === 'AssetRegistered';
+      } catch (e) {
+          return false;
+      }
+  });
+
+  const parsedEvent = assetRegistry.interface.parseLog(event);
+  const tokenId = parsedEvent.args.tokenId;
 
   console.log(`✔ Success! ALU Logo successfully registered on-chain.`);
   console.log(`Generated Token ID: ${tokenId.toString()}`);
@@ -38,11 +49,12 @@ async function main() {
   console.log("Deploying ALULogoToken...");
   const ALULogoToken = await ethers.getContractFactory("ALULogoToken");
   
-  // Pass the deployer's address to the constructor as the logoOwner
   const logoToken = await ALULogoToken.deploy(deployer.address);
-  await logoToken.deployed(); // or .waitForDeployment() if using ethers v6 here as well
+  // FIX: v6 uses waitForDeployment()
+  await logoToken.waitForDeployment(); 
 
-  console.log(`ALULogoToken deployed to: ${logoToken.address}`);
+  const tokenAddress = await logoToken.getAddress();
+  console.log(`ALULogoToken deployed to: ${tokenAddress}`);
   console.log(`1,000,000 ALUT minted to owner: ${deployer.address}`);
   console.log("==========================================================");
 }
