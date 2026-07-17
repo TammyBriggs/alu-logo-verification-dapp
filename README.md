@@ -54,7 +54,7 @@ npx hardhat node
 ### 2. Deploy the Contracts
 In a new terminal window:
 ```bash
-npx hardhat run scripts/deploy.js --network localhost
+npx hardhat run scripts/deploy.cjs --network localhost
 ```
 
 ### 3. Run the Development Server
@@ -67,14 +67,16 @@ npm run dev
 
 ### Connecting a Wallet
 1. Open the dApp in your browser at the local URL provided by Vite.
-2. Click the "Connect Wallet" button in the header.
+2. Click the "Connect Wallet" button in the header. (If you are on the wrong network, a "Switch to Localhost" button will appear).
 3. Approve the connection request in your MetaMask extension.
 
 ### Features
 
-* **Logo Verification:** Upload an image file or paste a SHA-256 hash directly into the Public Verification Area. The dApp automatically computes the hash and queries the registry, displaying a clear green (authentic) or red (warning) result.
-* **Asset Registration:** Once connected, use the Register New Logo form to upload an image and name your asset. This triggers a transaction that you must sign via your wallet.
-* **Token Dashboard:** Connected users can view their ALUT balance and total supply. If the connected wallet is the Contract Owner, a form appears allowing the distribution of ALUT tokens to other addresses.
+* **Logo Verification:** Upload an image file or paste a SHA-256 hash directly into the Public Verification Area. The dApp automatically computes the hash, queries the registry, and displays full on-chain metadata (Asset Name, File Type, Registration Date, and Registrar Address) if authentic.
+* **Asset Registration:** Once connected, use the Register New Logo form to preview an image upload, generate a client-side hash, and register the asset. The UI includes protections and clear error messaging against duplicate hash registrations.
+* **Token Dashboard:** Connected users can view their ALUT balance, fractional ownership percentage, and the total supply alongside a list of network example wallets.
+* **Admin Controls:** If the connected wallet is the Contract Owner, an exclusive form appears allowing the distribution of ALUT tokens to other addresses, complete with strict input validation.
+* **Network & Wallet Management:** Gracefully handles missing Web3 wallets, prompts for correct network switching (Localhost 8545), and securely refreshes the application state upon wallet disconnection.
 
 ## Known Issues and Limitations
 
