@@ -73,6 +73,10 @@ function App() {
   }, []);
 
   const switchNetwork = async () => {
+    if (!window.ethereum) {
+      setError("❌ No Web3 wallet detected.");
+      return;
+    }
     try {
       await window.ethereum.request({
         method: 'wallet_switchEthereumChain',
@@ -115,12 +119,8 @@ function App() {
   };
 
   const disconnectWallet = () => {
-    setAccount(null);
-    setBalance("0");
-    setUserPercentage("0");
-    setContractOwner("");
-    setError("");
     alert("Wallet successfully disconnected from the application state.");
+    window.location.reload();
   };
 
   const handleFileUpload = async (event) => {
@@ -210,17 +210,14 @@ function App() {
     e.preventDefault();
     setDistStatus({ type: "", message: "" });
 
-    // 1. Ownership validation
     if (!isOwner) {
       setDistStatus({ type: "error", message: "Unauthorized action: Only the official contract owner can distribute token shares." });
       return;
     }
-    // 2. Address validation
     if (!ethers.isAddress(distRecipient)) {
       setDistStatus({ type: "error", message: "Invalid wallet address. Please ensure the recipient address is formatted correctly (0x...)." });
       return;
     }
-    // 3. Amount validation
     if (Number(distAmount) <= 0) {
       setDistStatus({ type: "error", message: "Distribution failed. Please put in an amount greater than 0." });
       return;
@@ -255,15 +252,23 @@ function App() {
 
   return (
     <div style={{ padding: "2rem", fontFamily: "sans-serif", maxWidth: "1000px", margin: "0 auto" }}>
-      <header style={{ display: "flex", justifyContent: "space-between", borderBottom: "1px solid #ccc", paddingBottom: "1rem" }}>
+      
+      <header style={{ display: "flex", justifyContent: "space-between", alignItems: "center", borderBottom: "1px solid #ccc", paddingBottom: "1rem" }}>
         <h1>ALU Logo Tokenization Portal</h1>
-        {account ? (
-          <button onClick={disconnectWallet} style={{ padding: "0.5rem 1rem", cursor: "pointer" }}>Disconnect {formatAddress(account)}</button>
-        ) : (
-          <button onClick={connectWallet} disabled={isConnecting} style={{ padding: "0.5rem 1rem", cursor: "pointer" }}>
-            {isConnecting ? "Connecting..." : "Connect Wallet"}
+        <div style={{ display: "flex", gap: "1rem" }}>
+          <button onClick={switchNetwork} style={{ padding: "0.5rem 1rem", cursor: "pointer", background: "#f0ad4e", color: "white", border: "1px solid #eea236", borderRadius: "4px" }}>
+            Switch to Localhost
           </button>
-        )}
+          {account ? (
+            <button onClick={disconnectWallet} style={{ padding: "0.5rem 1rem", cursor: "pointer", background: "#f8f9fa", border: "1px solid #ccc", borderRadius: "4px" }}>
+              Disconnect {formatAddress(account)}
+            </button>
+          ) : (
+            <button onClick={connectWallet} disabled={isConnecting} style={{ padding: "0.5rem 1rem", cursor: "pointer", background: "#0070f3", color: "white", border: "none", borderRadius: "4px" }}>
+              {isConnecting ? "Connecting..." : "Connect Wallet"}
+            </button>
+          )}
+        </div>
       </header>
 
       {error && <div style={{ color: "red", padding: "1rem", background: "#fff0f0", marginTop: "1rem", border: "1px solid red", borderRadius: "4px" }}>{error}</div>}
@@ -322,8 +327,9 @@ function App() {
                 <h4 style={{ marginBottom: "0.5rem" }}>Network Example Wallets</h4>
                 <ul style={{ listStyleType: "none", padding: 0 }}>
                   {examplePercentages.map((ex, index) => (
-                    <li key={index} style={{ padding: "0.25rem 0" }}>
-                      Wallet {formatAddress(ex.address)}: <strong>{ex.percentage}%</strong> share
+                    <li key={index} style={{ padding: "0.25rem 0", display: "flex", gap: "10px", alignItems: "center" }}>
+                      <span style={{ fontFamily: "monospace", background: "#e9ecef", padding: "2px 6px", borderRadius: "4px" }}>{formatAddress(ex.address)}</span>
+                      <span><strong>{ex.percentage}%</strong> share</span>
                     </li>
                   ))}
                 </ul>
@@ -365,7 +371,7 @@ function App() {
             {/* SECTION 4: Admin Controls */}
             <section style={{ padding: "2rem", background: "#fffaf0", border: "1px solid #ffeeba", borderRadius: "8px", opacity: isOwner ? 1 : 0.6 }}>
               <h3>👑 Admin Dashboard: Distribute Shares</h3>
-              <p style={{ fontSize: "0.9rem", color: "#856404" }}>Authorized action: distribute token shares of the verified ALU logo to stakeholders.</p>
+              <p style={{ fontSize: "0.9rem", color: "#856404", marginBottom: "1rem" }}>Authorized action: distribute token shares of the verified ALU logo to stakeholders.</p>
               
               {!isOwner && (
                 <div style={{ padding: "0.75rem", background: "#f8d7da", color: "#721c24", borderRadius: "4px", marginBottom: "1rem", border: "1px solid #f5c6cb" }}>
