@@ -14,6 +14,7 @@ function App() {
   const [error, setError] = useState("");
   const [networkError, setNetworkError] = useState("");
   const [isConnecting, setIsConnecting] = useState(false);
+  const [isRightNetwork, setIsRightNetwork] = useState(true);
 
   const [filePreview, setFilePreview] = useState(null);
   const [fileHash, setFileHash] = useState("");
@@ -83,6 +84,7 @@ function App() {
         params: [{ chainId: '0x7a69' }], // 31337 in hex (Localhost)
       });
       setNetworkError("");
+      setIsRightNetwork(true);
     } catch (switchError) {
       setNetworkError("Please manually add and switch to the Localhost 8545 network in MetaMask.");
     }
@@ -104,6 +106,8 @@ function App() {
       
       if (chainId !== 31337n) {
          await switchNetwork();
+      } else {
+         setIsRightNetwork(true);
       }
 
       const accounts = await provider.send("eth_requestAccounts", []);
@@ -242,6 +246,19 @@ function App() {
   };
 
   useEffect(() => {
+    const checkCurrentChain = async () => {
+      if (window.ethereum) {
+        try {
+          const currentChainId = await window.ethereum.request({ method: 'eth_chainId' });
+          setIsRightNetwork(currentChainId === '0x7a69'); // '0x7a69' is 31337 in hex
+        } catch (err) {
+          console.error("Chain check failed:", err);
+        }
+      }
+    };
+    
+    checkCurrentChain();
+
     if (window.ethereum) {
       window.ethereum.on("accountsChanged", (accs) => accs.length > 0 ? (setAccount(accs[0]), fetchDashboardData(accs[0])) : disconnectWallet());
       window.ethereum.on("chainChanged", () => window.location.reload());
@@ -256,9 +273,11 @@ function App() {
       <header style={{ display: "flex", justifyContent: "space-between", alignItems: "center", borderBottom: "1px solid #ccc", paddingBottom: "1rem" }}>
         <h1>ALU Logo Tokenization Portal</h1>
         <div style={{ display: "flex", gap: "1rem" }}>
-          <button onClick={switchNetwork} style={{ padding: "0.5rem 1rem", cursor: "pointer", background: "#f0ad4e", color: "white", border: "1px solid #eea236", borderRadius: "4px" }}>
-            Switch to Localhost
-          </button>
+          {!isRightNetwork && (
+            <button onClick={switchNetwork} style={{ padding: "0.5rem 1rem", cursor: "pointer", background: "#f0ad4e", color: "white", border: "1px solid #eea236", borderRadius: "4px" }}>
+              Switch to Localhost
+            </button>
+          )}
           {account ? (
             <button onClick={disconnectWallet} style={{ padding: "0.5rem 1rem", cursor: "pointer", background: "#f8f9fa", border: "1px solid #ccc", borderRadius: "4px" }}>
               Disconnect {formatAddress(account)}
