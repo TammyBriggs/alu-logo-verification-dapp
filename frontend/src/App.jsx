@@ -12,6 +12,7 @@ function App() {
   const [account, setAccount] = useState(null);
   const [balance, setBalance] = useState("0");
   const [error, setError] = useState("");
+  const [networkError, setNetworkError] = useState("");
   const [isConnecting, setIsConnecting] = useState(false);
 
   const [filePreview, setFilePreview] = useState(null);
@@ -71,23 +72,43 @@ function App() {
     }
   }, []);
 
+  const switchNetwork = async () => {
+    try {
+      await window.ethereum.request({
+        method: 'wallet_switchEthereumChain',
+        params: [{ chainId: '0x7a69' }], // 31337 in hex (Localhost)
+      });
+      setNetworkError("");
+    } catch (switchError) {
+      setNetworkError("Please manually add and switch to the Localhost 8545 network in MetaMask.");
+    }
+  };
+
   const connectWallet = async () => {
     setError("");
+    setNetworkError("");
     setIsConnecting(true);
+    
     if (!window.ethereum) {
-      setError("No Web3 wallet detected. Please install MetaMask.");
+      setError("❌ No Web3 wallet detected. Please install the MetaMask extension to use this application.");
       setIsConnecting(false);
       return;
     }
     try {
       const provider = new ethers.BrowserProvider(window.ethereum);
+      const { chainId } = await provider.getNetwork();
+      
+      if (chainId !== 31337n) {
+         await switchNetwork();
+      }
+
       const accounts = await provider.send("eth_requestAccounts", []);
       if (accounts.length > 0) {
         setAccount(accounts[0]);
         await fetchDashboardData(accounts[0]);
       }
     } catch (err) {
-      setError("Connection request rejected.");
+      setError("Connection request rejected or failed.");
     } finally {
       setIsConnecting(false);
     }
@@ -99,6 +120,7 @@ function App() {
     setUserPercentage("0");
     setContractOwner("");
     setError("");
+    alert("Wallet successfully disconnected from the application state.");
   };
 
   const handleFileUpload = async (event) => {
@@ -117,19 +139,42 @@ function App() {
     }
   };
 
+  const handleVerificationFileUpload = async (event) => {
+    const file = event.target.files[0];
+    if (!file) return;
+    const reader = new FileReader();
+    reader.onload = async (ev) => {
+      const h = await crypto.subtle.digest("SHA-256", ev.target.result);
+      const hx = Array.from(new Uint8Array(h)).map(b=>b.toString(16).padStart(2,'0')).join('');
+      const hash = "0x" + hx;
+      setVerifyInputHash(hash);
+      executeVerification(hash);
+    };
+    reader.readAsArrayBuffer(file);
+  };
+
   const handleRegister = async (event) => {
     event.preventDefault();
     setIsRegistering(true);
+    setTxStatus({ type: "", message: "" });
     try {
       const provider = new ethers.BrowserProvider(window.ethereum);
       const signer = await provider.getSigner();
       const registryContract = new ethers.Contract(REGISTRY_CONTRACT_ADDRESS, REGISTRY_ABI, signer);
       const tx = await registryContract.registerAsset(assetName, fileType, fileHash);
       await tx.wait();
-      setTxStatus({ type: "success", message: "Success! Asset registered." });
+      setTxStatus({ type: "success", message: "Success! Asset successfully registered to the blockchain." });
       setAssetName("");
+      setFilePreview(null);
+      setFileHash("");
     } catch (err) {
-      setTxStatus({ type: "error", message: "Registration failed." });
+      let msg = "Registration failed. ";
+      if (err.message.includes("user rejected")) {
+        msg += "You rejected the transaction in MetaMask.";
+      } else {
+        msg += "This hash may already be registered on the blockchain, or the input data is invalid.";
+      }
+      setTxStatus({ type: "error", message: msg });
     } finally {
       setIsRegistering(false);
     }
@@ -138,6 +183,7 @@ function App() {
   const executeVerification = async (hashToVerify) => {
     if (!hashToVerify) return;
     setIsVerifying(true);
+    setVerifyResult(null);
     try {
       const publicProvider = new ethers.JsonRpcProvider("http://localhost:8545");
       const registryContract = new ethers.Contract(REGISTRY_CONTRACT_ADDRESS, REGISTRY_ABI, publicProvider);
@@ -145,11 +191,16 @@ function App() {
       let metadata = null;
       if (authentic) {
         const asset = await registryContract.getAsset(1);
-        metadata = { name: asset.assetName, type: asset.fileType, registeredBy: asset.registeredBy, date: new Date(Number(asset.registrationTimestamp) * 1000).toLocaleString() };
+        metadata = { 
+          name: asset.assetName, 
+          type: asset.fileType, 
+          registeredBy: asset.registeredBy, 
+          date: new Date(Number(asset.registrationTimestamp) * 1000).toLocaleString() 
+        };
       }
       setVerifyResult({ authentic, metadata });
     } catch (err) {
-      setVerifyResult({ authentic: false, message: "Error verifying." });
+      setVerifyResult({ authentic: false, message: "Error communicating with the blockchain." });
     } finally {
       setIsVerifying(false);
     }
@@ -157,6 +208,24 @@ function App() {
 
   const handleDistribute = async (e) => {
     e.preventDefault();
+    setDistStatus({ type: "", message: "" });
+
+    // 1. Ownership validation
+    if (!isOwner) {
+      setDistStatus({ type: "error", message: "Unauthorized action: Only the official contract owner can distribute token shares." });
+      return;
+    }
+    // 2. Address validation
+    if (!ethers.isAddress(distRecipient)) {
+      setDistStatus({ type: "error", message: "Invalid wallet address. Please ensure the recipient address is formatted correctly (0x...)." });
+      return;
+    }
+    // 3. Amount validation
+    if (Number(distAmount) <= 0) {
+      setDistStatus({ type: "error", message: "Distribution failed. Please put in an amount greater than 0." });
+      return;
+    }
+
     setIsDistributing(true);
     try {
       const provider = new ethers.BrowserProvider(window.ethereum);
@@ -164,10 +233,12 @@ function App() {
       const tokenContract = new ethers.Contract(TOKEN_CONTRACT_ADDRESS, TOKEN_ABI, signer);
       const tx = await tokenContract.distributeShares(distRecipient, BigInt(distAmount));
       await tx.wait();
-      setDistStatus({ type: "success", message: "Distribution successful." });
+      setDistStatus({ type: "success", message: "Distribution successful. The recipient's balance has been updated." });
       fetchDashboardData(account);
+      setDistRecipient("");
+      setDistAmount("");
     } catch (err) {
-      setDistStatus({ type: "error", message: "Distribution failed." });
+      setDistStatus({ type: "error", message: "Distribution failed. Ensure you have enough token supply to execute this transfer." });
     } finally {
       setIsDistributing(false);
     }
@@ -176,6 +247,7 @@ function App() {
   useEffect(() => {
     if (window.ethereum) {
       window.ethereum.on("accountsChanged", (accs) => accs.length > 0 ? (setAccount(accs[0]), fetchDashboardData(accs[0])) : disconnectWallet());
+      window.ethereum.on("chainChanged", () => window.location.reload());
     }
   }, [fetchDashboardData]);
 
@@ -186,21 +258,53 @@ function App() {
       <header style={{ display: "flex", justifyContent: "space-between", borderBottom: "1px solid #ccc", paddingBottom: "1rem" }}>
         <h1>ALU Logo Tokenization Portal</h1>
         {account ? (
-          <button onClick={disconnectWallet}>Disconnect {formatAddress(account)}</button>
+          <button onClick={disconnectWallet} style={{ padding: "0.5rem 1rem", cursor: "pointer" }}>Disconnect {formatAddress(account)}</button>
         ) : (
-          <button onClick={connectWallet}>Connect Wallet</button>
+          <button onClick={connectWallet} disabled={isConnecting} style={{ padding: "0.5rem 1rem", cursor: "pointer" }}>
+            {isConnecting ? "Connecting..." : "Connect Wallet"}
+          </button>
         )}
       </header>
+
+      {error && <div style={{ color: "red", padding: "1rem", background: "#fff0f0", marginTop: "1rem", border: "1px solid red", borderRadius: "4px" }}>{error}</div>}
+      {networkError && <div style={{ color: "#856404", padding: "1rem", background: "#fff3cd", marginTop: "1rem", border: "1px solid #ffeeba", borderRadius: "4px" }}>⚠️ {networkError}</div>}
 
       <main style={{ marginTop: "2rem" }}>
         {/* SECTION 1: Public Logo Verification */}
         <section style={{ padding: "2rem", border: "2px solid #0070f3", borderRadius: "8px", marginBottom: "2rem" }}>
           <h2>🔍 Public Logo Verification</h2>
-          <p style={{ color: "#666" }}>Upload a logo file to check its cryptographic authenticity against the ALU blockchain registry without using gas.</p>
-          <input type="file" onChange={(e) => { const f = e.target.files[0]; const reader = new FileReader(); reader.onload = async (ev) => { const h = await crypto.subtle.digest("SHA-256", ev.target.result); const hx = Array.from(new Uint8Array(h)).map(b=>b.toString(16).padStart(2,'0')).join(''); executeVerification("0x"+hx); }; reader.readAsArrayBuffer(f); }} />
+          <p style={{ color: "#666", marginBottom: "1rem" }}>Upload a file or paste a SHA-256 hash to cryptographically verify authenticity.</p>
+          
+          <div style={{ display: "flex", gap: "1rem", alignItems: "center", marginBottom: "1rem" }}>
+            <input type="file" onChange={handleVerificationFileUpload} />
+          </div>
+          
+          <div style={{ display: "flex", gap: "1rem", alignItems: "center" }}>
+            <input 
+              type="text" 
+              placeholder="Or paste SHA-256 hash here (0x...)" 
+              value={verifyInputHash} 
+              onChange={(e) => setVerifyInputHash(e.target.value)} 
+              style={{ padding: "0.5rem", flex: 1 }} 
+            />
+            <button onClick={() => executeVerification(verifyInputHash)} disabled={!verifyInputHash || isVerifying} style={{ padding: "0.5rem 1rem", cursor: "pointer" }}>
+              {isVerifying ? "Verifying..." : "Verify Pasted Hash"}
+            </button>
+          </div>
+
           {verifyResult && (
             <div style={{ marginTop: "1rem", padding: "1rem", borderRadius: "4px", background: verifyResult.authentic ? "#f0fff4" : "#fff0f0", border: verifyResult.authentic ? "1px solid #cdfaf3" : "1px solid #f8d7da" }}>
-              {verifyResult.authentic ? `✅ Authenticated: ${verifyResult.metadata.name} (${verifyResult.metadata.type})` : "❌ Warning: This file hash does not match any official ALU asset registry record."}
+              {verifyResult.authentic ? (
+                <>
+                  <h4 style={{ color: "green", margin: "0 0 0.5rem 0" }}>✅ Authenticated Record Found</h4>
+                  <p style={{ margin: "0.25rem 0" }}><strong>Asset Name:</strong> {verifyResult.metadata.name}</p>
+                  <p style={{ margin: "0.25rem 0" }}><strong>File Type:</strong> {verifyResult.metadata.type}</p>
+                  <p style={{ margin: "0.25rem 0" }}><strong>Registration Date:</strong> {verifyResult.metadata.date}</p>
+                  <p style={{ margin: "0.25rem 0", wordBreak: "break-all" }}><strong>Registered By:</strong> {verifyResult.metadata.registeredBy}</p>
+                </>
+              ) : (
+                <p style={{ color: "red", margin: 0 }}>❌ Warning: This hash does not match the official ALU registry.</p>
+              )}
             </div>
           )}
         </section>
@@ -213,12 +317,23 @@ function App() {
               <p><strong>Total Supply:</strong> {totalSupply} ALUT</p>
               <p><strong>Your Balance:</strong> {balance} ALUT</p>
               <p><strong>Your Fractional Share:</strong> {userPercentage}%</p>
+              
+              <div style={{ marginTop: "1.5rem", paddingTop: "1rem", borderTop: "1px solid #dee2e6" }}>
+                <h4 style={{ marginBottom: "0.5rem" }}>Network Example Wallets</h4>
+                <ul style={{ listStyleType: "none", padding: 0 }}>
+                  {examplePercentages.map((ex, index) => (
+                    <li key={index} style={{ padding: "0.25rem 0" }}>
+                      Wallet {formatAddress(ex.address)}: <strong>{ex.percentage}%</strong> share
+                    </li>
+                  ))}
+                </ul>
+              </div>
             </section>
 
-            {/* SECTION 3: Missing Asset Registration Form */}
+            {/* SECTION 3: Asset Registration Form */}
             <section style={{ padding: "2rem", border: "1px solid #ccc", borderRadius: "8px", marginBottom: "2rem" }}>
               <h2>📝 Register New Asset / Logo Variant</h2>
-              <form onSubmit={handleRegister} style={{ display: "flex", flexDirection: "column", gap: "1rem", maxWidth: "400px" }}>
+              <form onSubmit={handleRegister} style={{ display: "flex", flexDirection: "column", gap: "1rem", maxWidth: "500px" }}>
                 <div>
                   <label style={{ display: "block", marginBottom: "0.5rem" }}>Asset Name:</label>
                   <input type="text" placeholder="e.g., ALU Graduation Logo 2026" value={assetName} onChange={(e) => setAssetName(e.target.value)} required style={{ width: "100%", padding: "0.5rem" }} />
@@ -226,6 +341,12 @@ function App() {
                 <div>
                   <label style={{ display: "block", marginBottom: "0.5rem" }}>Upload File to Hash:</label>
                   <input type="file" onChange={handleFileUpload} required />
+                  {filePreview && (
+                    <div style={{ marginTop: "1rem" }}>
+                      <p style={{ fontSize: "0.85rem", color: "#666", marginBottom: "0.5rem" }}>Image Preview:</p>
+                      <img src={filePreview} alt="Upload Preview" style={{ maxWidth: "200px", border: "1px solid #ccc", borderRadius: "4px" }} />
+                    </div>
+                  )}
                 </div>
                 {fileHash && (
                   <div style={{ fontSize: "0.85rem", background: "#eee", padding: "0.5rem", wordBreak: "break-all" }}>
@@ -237,27 +358,32 @@ function App() {
                 </button>
               </form>
               {txStatus.message && (
-                <p style={{ marginTop: "1rem", color: txStatus.type === "success" ? "green" : "red" }}>{txStatus.message}</p>
+                <p style={{ marginTop: "1rem", fontWeight: "bold", color: txStatus.type === "success" ? "green" : "red" }}>{txStatus.message}</p>
               )}
             </section>
 
             {/* SECTION 4: Admin Controls */}
-            {isOwner && (
-              <section style={{ padding: "2rem", background: "#fffaf0", border: "1px solid #ffeeba", borderRadius: "8px" }}>
-                <h3>👑 Admin Dashboard: Distribute Shares</h3>
-                <p style={{ fontSize: "0.9rem", color: "#856404" }}>Authorized action: distribute token shares of the verified ALU logo to stakeholders.</p>
-                <form onSubmit={handleDistribute} style={{ display: "flex", gap: "1rem", alignItems: "center" }}>
-                  <input placeholder="Recipient Wallet Address (0x...)" value={distRecipient} onChange={(e) => setDistRecipient(e.target.value)} required style={{ padding: "0.5rem", flex: 2 }} />
-                  <input type="number" placeholder="Amount (raw units)" value={distAmount} onChange={(e) => setDistAmount(e.target.value)} required style={{ padding: "0.5rem", flex: 1 }} />
-                  <button type="submit" disabled={isDistributing} style={{ padding: "0.5rem 1rem", background: "#28a745", color: "white", border: "none", borderRadius: "4px", cursor: "pointer" }}>
-                    {isDistributing ? "Sending..." : "Distribute"}
-                  </button>
-                </form>
-                {distStatus.message && (
-                  <p style={{ marginTop: "1rem", color: distStatus.type === "success" ? "green" : "red" }}>{distStatus.message}</p>
-                )}
-              </section>
-            )}
+            <section style={{ padding: "2rem", background: "#fffaf0", border: "1px solid #ffeeba", borderRadius: "8px", opacity: isOwner ? 1 : 0.6 }}>
+              <h3>👑 Admin Dashboard: Distribute Shares</h3>
+              <p style={{ fontSize: "0.9rem", color: "#856404" }}>Authorized action: distribute token shares of the verified ALU logo to stakeholders.</p>
+              
+              {!isOwner && (
+                <div style={{ padding: "0.75rem", background: "#f8d7da", color: "#721c24", borderRadius: "4px", marginBottom: "1rem", border: "1px solid #f5c6cb" }}>
+                  🔒 View-only mode. Only the official contract owner can distribute token shares.
+                </div>
+              )}
+
+              <form onSubmit={handleDistribute} style={{ display: "flex", gap: "1rem", alignItems: "center", flexWrap: "wrap" }}>
+                <input placeholder="Recipient Wallet Address (0x...)" value={distRecipient} onChange={(e) => setDistRecipient(e.target.value)} disabled={!isOwner} style={{ padding: "0.5rem", flex: 2, minWidth: "250px" }} />
+                <input type="number" placeholder="Amount (raw units)" value={distAmount} onChange={(e) => setDistAmount(e.target.value)} disabled={!isOwner} style={{ padding: "0.5rem", flex: 1, minWidth: "120px" }} />
+                <button type="submit" disabled={isDistributing || !isOwner} style={{ padding: "0.5rem 1rem", background: isOwner ? "#28a745" : "#ccc", color: "white", border: "none", borderRadius: "4px", cursor: isOwner ? "pointer" : "not-allowed" }}>
+                  {isDistributing ? "Sending..." : "Distribute"}
+                </button>
+              </form>
+              {distStatus.message && (
+                <p style={{ marginTop: "1rem", fontWeight: "bold", color: distStatus.type === "success" ? "green" : "red" }}>{distStatus.message}</p>
+              )}
+            </section>
           </div>
         )}
       </main>
